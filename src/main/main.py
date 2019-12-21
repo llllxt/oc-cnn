@@ -126,6 +126,13 @@ parser.add_argument(
 )
 
 parser.add_argument(
+	"--D",
+	default=4096,
+	type=int,
+	help="dimension"
+)
+
+parser.add_argument(
 	"--model_mode",
 	default='train',
 	help="train or eval"
@@ -157,6 +164,7 @@ if(args.default==False):
 	hyper_para.sigma 			= float(args.sigma)
 	hyper_para.pre_trained_flag = args.pre_trained_flag
 	hyper_para.N 				= args.N
+	hyper_para.D                = args.D
 	hyper_para.gamma 			= float(args.gamma)
 	hyper_para.model_type		= model_type
 	hyper_para.classifier_type 	= args.classifier_type

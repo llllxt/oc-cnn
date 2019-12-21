@@ -9,7 +9,7 @@ class hyperparameters():
 		self.lr							 = 1e-4
 		self.sigma 						 = 0.01
 		self.sigma1						 = 0.000000000000000000000000000000000000000000000000000000000000000000001
-		self.D                           = 4096
+		self.D                           = 256
 		self.N 							 = 0.5
 		self.gamma 						 = float(1/4096.0)
 
