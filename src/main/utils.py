@@ -1,5 +1,4 @@
 
-
 ### importing all the important libraries
 import torch
 import torchvision
@@ -49,10 +48,6 @@ from light_cnn import *
 from PIL import Image
 
 from models import resnet26
-from sklearn.ensemble import IsolationForest
-from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score, average_precision_score
-from evals import do_roc
-
 
 RESCALE = 224
 subfd_threecls='oc-cnn-data'
@@ -138,7 +133,7 @@ def get_dataset(root_dir,split,valid_set=False):
         files_name = glob.glob(os.path.join(img_path,"*.jpeg"))
        
         if split == 'train':
-            files_name = random.sample(files_name,10000)
+            files_name = random.sample(files_name,6000)
         else:
             files_name = random.sample(files_name,5000)
         for name in files_name:
@@ -148,29 +143,21 @@ def get_dataset(root_dir,split,valid_set=False):
                 im_arr = jpg_image_to_array(name,sz=RESCALE)
                 imgs.append(im_arr)
                 lbls.append(0)
-               
-            elif labels[labels['image']==img_name]['level'].values[0] == 4:
-                im_arr = jpg_image_to_array(name,sz=RESCALE)
-                imgs.append(im_arr)
-                lbls.append(1)
-                   
             else:
-                continue
-
-                # if(split == 'train'):
-                #     continue
-                # else:
-                #     if labels[labels['image']==img_name]['level'].values[0] == 4:
-                #         im_arr = jpg_image_to_array(name,sz=RESCALE)
-                #         imgs.append(im_arr)
-                #         lbls.append(1)
-                #     else:
-                #         continue
+                if(split == 'train'):
+                    continue
+                else:
+                    if labels[labels['image']==img_name]['level'].values[0] == 4:
+                        im_arr = jpg_image_to_array(name,sz=RESCALE)
+                        imgs.append(im_arr)
+                        lbls.append(1)
+                    else:
+                        continue
         print('Saving')
         np.save(x_name,imgs)
         np.save(y_name,lbls)
         print('normal data shape')
-        print(sum(lbls))
+        print(len(imgs))
     return imgs,lbls
 
 def load_dataset(dataset, class_number, mean, std, hyper_para):
@@ -179,21 +166,20 @@ def load_dataset(dataset, class_number, mean, std, hyper_para):
     
         train_data,_ = get_dataset(root_dir,'train')
         test_data, test_label = get_dataset(root_dir,'test')
-       
+        print("###########")
         train_data = np.array(train_data)
         test_data = np.array(test_data)
         
-        # for i in range(3):
-        #     # print m[i]
-        #     train_data[:,i,:,:] = (train_data[:,i,:,:]-mean[i])/std[i]
-        #     test_data[:,i,:,:] = (test_data[:,i,:,:]-mean[i])/std[i]
+        for i in range(3):
+            # print m[i]
+            train_data[:,i,:,:] = (train_data[:,i,:,:]-mean[i])/std[i]
+            test_data[:,i,:,:] = (test_data[:,i,:,:]-mean[i])/std[i]
 
         if(hyper_para.verbose==True):
             print('data pre-processed.')
 
         train_data = torch.from_numpy(train_data)
         test_data = torch.from_numpy(test_data)
-        
     # if(dataset=='abnormal'):
     #   # change path files according to path on your device
     #   # normal_data_path = '/home/labuser/Desktop/research/datasets/anomaly/normal/mat/raw/anomaly_normal_data_'+str(class_number)+'.mat'
@@ -433,10 +419,9 @@ def choose_classifier(dataset, class_number, model_type, model, classifier, hype
 
     for i in range(no_train_data):
         temp = model(torch.autograd.Variable(train_data[i:(i+1)].cuda().contiguous().float())).float()
-        # temp = temp.view(1,1,hyper_para.D)
-        # temp = inm(temp)
-        # temp = relu(temp.view(hyper_para.D))
-        temp = temp.view(hyper_para.D)
+        temp = temp.view(1,1,hyper_para.D)
+        temp = inm(temp)
+        temp = relu(temp.view(hyper_para.D))
         train_features[i:(i+1)] = temp.data.cpu()
     train_data = None
 
@@ -458,60 +443,26 @@ def choose_classifier(dataset, class_number, model_type, model, classifier, hype
         print np.shape(test_features)
         start = time.time()
         for j in range(no_test_data):
-            temp = model(torch.autograd.Variable(test_data[j:(j+1)].cuda().contiguous().float())).float()
-
-            # temp = model(AddNoise(torch.autograd.Variable(test_data[j:(j+1)].cuda().contiguous().float()), hyper_para.sigma1)).float()
-            # temp = temp.view(1,1,hyper_para.D)
-            # temp = inm(temp)
+            temp = model(AddNoise(torch.autograd.Variable(test_data[j:(j+1)].cuda().contiguous().float()), hyper_para.sigma1)).float()
+            temp = temp.view(1,1,hyper_para.D)
+            temp = inm(temp)
             temp = temp.view(hyper_para.D)
             
             test_features[k:(k+1)] = temp.data.cpu()
-            # test_scores[k:(k+1)]   = classifier(relu(temp)).data.cpu()[1]
+            test_scores[k:(k+1)]   = classifier(relu(temp)).data.cpu()[1]
             # print(classifier(relu(temp)).data.cpu())
             
             k = k+1
-        print("#############feature shape################")
-        print(train_features.shape)
-        print(test_features.shape)
-        model2=IsolationForest(contamination='auto',behaviour='new')
-        print("training...")
-        model2.fit(train_features)
-        print("predicting...")
-        # y_pred_train = model2.predict(x_train)
-        y_pred_test = model2.predict(test_features)
-        scores = -model2.decision_function(test_features)
-        auroc = do_roc(scores=scores, true_labels=test_label, file_name='roc', directory='data', plot=False)
-        print('AUROC:', auroc)
-        per = get_percentile(scores)
-        print(per)
-        y_pred = (scores>=per).astype(int)
-        cm = confusion_matrix(test_label, y_pred, labels=None, sample_weight=None)
-        print('confusion matrix:',cm)
-        # scorestrain = -model2.decision_function(x_train)
-        
-        # for j in range(no_test_data):
-        #     temp = model(torch.autograd.Variable(test_data[j:(j+1)].cuda().contiguous().float())).float()
-
-        #     # temp = model(AddNoise(torch.autograd.Variable(test_data[j:(j+1)].cuda().contiguous().float()), hyper_para.sigma1)).float()
-        #     temp = temp.view(1,1,hyper_para.D)
-        #     temp = inm(temp)
-        #     temp = temp.view(hyper_para.D)
-            
-        #     test_features[k:(k+1)] = temp.data.cpu()
-        #     test_scores[k:(k+1)]   = classifier(relu(temp)).data.cpu()[1]
-        #     # print(classifier(relu(temp)).data.cpu())
-            
-        #     k = k+1
-        # end = time.time()
-        # print(end-start)
-        # test_scores    = test_scores.numpy()
-        # test_features  = test_features.numpy()
-        # train_features = train_features.numpy()
+        end = time.time()
+        print(end-start)
+        test_scores    = test_scores.numpy()
+        test_features  = test_features.numpy()
+        train_features = train_features.numpy()
 
         np.save("feature1.npy",test_features)
         np.save("label1.npy",test_label)
 
-        # test_scores = (test_scores-np.min(test_scores))/(np.max(test_scores)-np.min(test_scores))
+        test_scores = (test_scores-np.min(test_scores))/(np.max(test_scores)-np.min(test_scores))
 
     elif(hyper_para.classifier_type=='OC_SVM_linear'):
         # train one-class svm
@@ -542,17 +493,17 @@ def choose_classifier(dataset, class_number, model_type, model, classifier, hype
                                                                                 str(hyper_para.sigma)     +'_'+
                                                                                 str(hyper_para.N)         +'.pkl')
 
-    # fpr, tpr, thresholds = metrics.roc_curve(test_label, test_scores)
-    # per = get_percentile(test_scores)
+    fpr, tpr, thresholds = metrics.roc_curve(test_label, test_scores)
+    per = get_percentile(test_scores)
     # print(per)
-    # y_pred = (test_scores>=per).astype(int)
+    y_pred = (test_scores>=per).astype(int)
 
-    # if(hyper_para.verbose==True):
-    #     print('Test scores and AUC computed.')
+    if(hyper_para.verbose==True):
+        print('Test scores and AUC computed.')
 
-    # area_under_curve = metrics.auc(fpr,tpr)
-    # cm = confusion_matrix(test_label, y_pred, labels=None, sample_weight=None)
-    # print cm
+    area_under_curve = metrics.auc(fpr,tpr)
+    cm = confusion_matrix(test_label, y_pred, labels=None, sample_weight=None)
+    print cm
 
     return area_under_curve, train_features, test_scores, test_features
 
@@ -611,88 +562,86 @@ def OC_CNN(dataset, model_type, class_number, hyper_para):
         model.cuda()
         classifier.cuda()
     
-    # model.train()
-    # classifier.train()
+    model.train()
+    classifier.train()
     
-    # ### optimizer for model training (for this work we restrict to only fine-tuning FC layers)
-    # # if(model_type=='vggface'):
-    # #     model_optimizer      = optim.Adam(model[-5:].parameters(), lr=hyper_para.lr)
-    # # else:
-    # #     model_optimizer      = optim.Adam(model.classifier.parameters(), lr=hyper_para.lr)
-    # classifier_optimizer = optim.Adam(classifier.parameters(), lr=hyper_para.lr)
+    ### optimizer for model training (for this work we restrict to only fine-tuning FC layers)
+    # if(model_type=='vggface'):
+    #     model_optimizer      = optim.Adam(model[-5:].parameters(), lr=hyper_para.lr)
+    # else:
+    #     model_optimizer      = optim.Adam(model.classifier.parameters(), lr=hyper_para.lr)
+    classifier_optimizer = optim.Adam(classifier.parameters(), lr=hyper_para.lr)
     
-    # # loss functions
-    # cross_entropy_criterion = nn.CrossEntropyLoss()
-    # print("hyper_para.iterations")
-    # print(int(hyper_para.iterations))
+    # loss functions
+    cross_entropy_criterion = nn.CrossEntropyLoss()
+    print("hyper_para.iterations")
+    print(int(hyper_para.iterations))
 
-    # for i in range(int(hyper_para.iterations)):
+    for i in range(int(hyper_para.iterations)):
         
-    # # for i in range(int(hyper_para.iterations*no_train_data/hyper_para.batch_size)):
-    #     # print i
-    #     rand_id = np.asarray(random.sample( range(no_train_data), int(hyper_para.batch_size)))
-    #     rand_id = torch.from_numpy(rand_id)
+    # for i in range(int(hyper_para.iterations*no_train_data/hyper_para.batch_size)):
+        # print i
+        rand_id = np.asarray(random.sample( range(no_train_data), int(hyper_para.batch_size)))
+        rand_id = torch.from_numpy(rand_id)
 
-    #     # get the inputs
-    #     inputs = torch.autograd.Variable(train_data[rand_id].cuda()).float()
+        # get the inputs
+        inputs = torch.autograd.Variable(train_data[rand_id].cuda()).float()
         
-    #     # get the labels
-    #     labels = np.concatenate( (np.zeros( (int(hyper_para.batch_size),) ), np.ones( (int(hyper_para.batch_size),)) ), axis=0)
-    #     labels = torch.from_numpy(labels)
-    #     labels = torch.autograd.Variable(labels.cuda()).long()
+        # get the labels
+        labels = np.concatenate( (np.zeros( (int(hyper_para.batch_size),) ), np.ones( (int(hyper_para.batch_size),)) ), axis=0)
+        labels = torch.from_numpy(labels)
+        labels = torch.autograd.Variable(labels.cuda()).long()
         
-    #     gaussian_data = np.random.normal(0, hyper_para.sigma, (int(hyper_para.batch_size), hyper_para.D))
-    #     gaussian_data = torch.from_numpy(gaussian_data)
+        gaussian_data = np.random.normal(0, hyper_para.sigma, (int(hyper_para.batch_size), hyper_para.D))
+        gaussian_data = torch.from_numpy(gaussian_data)
 
-    #     # forward + backward + optimize
-    #     out1 = model(AddNoise(inputs, hyper_para.sigma1))
-    #     print("#################")
-    #     print(out1.shape)
+        # forward + backward + optimize
+        out1 = model(AddNoise(inputs, hyper_para.sigma1))
 
-    #     out1 = out1.view(int(hyper_para.batch_size), 1, hyper_para.D)
+        out1 = out1.view(int(hyper_para.batch_size), 1, hyper_para.D)
 
-    #     # copy1 = out1.cpu().detach().numpy()
+        copy1 = out1.cpu().detach().numpy()
 
-    #     # if i:
-    #     #     features = np.concatenate([features,copy1],axis=0)
-    #     #     label = np.concatenate([label,labels])
-    #     # else:
-    #     #     features = copy1
-    #     #     label = labels
+        # if i:
+        #     features = np.concatenate([features,copy1],axis=0)
+        #     label = np.concatenate([label,labels])
+        # else:
+        #     features = copy1
+        #     label = labels
 
-    #     out1 = inm(out1)
-    #     out1 = out1.view(int(hyper_para.batch_size), hyper_para.D)
-    #     out2 = torch.autograd.Variable(gaussian_data.cuda()).float()
-    #     out  = torch.cat( (out1, out2),0)
-    #     out  = relu(out)
-    #     out  = classifier(out)
+        out1 = inm(out1)
+        out1 = out1.view(int(hyper_para.batch_size), hyper_para.D)
+        out2 = torch.autograd.Variable(gaussian_data.cuda()).float()
+        out  = torch.cat( (out1, out2),0)
+        out  = relu(out)
+        out  = classifier(out)
 
 
         
-    #     # zero the parameter gradients
-    #     # model_optimizer.zero_grad()
-    #     classifier_optimizer.zero_grad()
+        # zero the parameter gradients
+        # model_optimizer.zero_grad()
+        classifier_optimizer.zero_grad()
          
-    #     cc = cross_entropy_criterion(out, labels) 
-    #     loss = cc
+        cc = cross_entropy_criterion(out, labels) 
+        loss = cc
         
-    #     loss.backward()
+        loss.backward()
 
-    #     # model_optimizer.step()
-    #     classifier_optimizer.step()
+        # model_optimizer.step()
+        classifier_optimizer.step()
         
-    #     # print statistics
-    #     running_cc += cc.data
-    #     running_loss += loss.data
+        # print statistics
+        running_cc += cc.data
+        running_loss += loss.data
 
-    #     # if(hyper_para.verbose==True):
-    #     #     if (i % (hyper_para.stats_freq) == (hyper_para.stats_freq-1)):    # print every stats_frequency batches
-    #     #         line = hyper_para.BLUE   + '[' + str(format(i+1, '8d')) + '/'+ str(format(int(hyper_para.iterations), '8d')) + ']' + hyper_para.ENDC + \
-    #     #             hyper_para.GREEN  + ' loss: '     + hyper_para.ENDC + str(format(running_loss/hyper_para.stats_freq, '1.8f'))  + \
-    #     #             hyper_para.GREEN  + ' cc: '     + hyper_para.ENDC + str(format(running_cc/hyper_para.stats_freq, '1.8f'))
-    #     #         print(line)
-    #     #         running_loss = 0.0
-    #     #         running_cc = 0.0
+        # if(hyper_para.verbose==True):
+        #     if (i % (hyper_para.stats_freq) == (hyper_para.stats_freq-1)):    # print every stats_frequency batches
+        #         line = hyper_para.BLUE   + '[' + str(format(i+1, '8d')) + '/'+ str(format(int(hyper_para.iterations), '8d')) + ']' + hyper_para.ENDC + \
+        #             hyper_para.GREEN  + ' loss: '     + hyper_para.ENDC + str(format(running_loss/hyper_para.stats_freq, '1.8f'))  + \
+        #             hyper_para.GREEN  + ' cc: '     + hyper_para.ENDC + str(format(running_cc/hyper_para.stats_freq, '1.8f'))
+        #         print(line)
+        #         running_loss = 0.0
+        #         running_cc = 0.0
             
     classifier.eval()
     model.eval()
@@ -702,7 +651,6 @@ def OC_CNN(dataset, model_type, class_number, hyper_para):
     # np.save("label1.npy",label)
 
     area_under_curve, train_features, test_scores, test_features = choose_classifier(dataset, class_number, model_type, model, classifier, hyper_para, train_data, test_data, test_label, no_train_data, no_test_data, inm, relu, imagenet_mean, imagenet_std)
-    
 
     classifier.cpu()
     model.cpu()
